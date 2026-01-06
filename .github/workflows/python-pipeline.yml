@@ -1,93 +1,93 @@
-name: Python CI/CD Pipeline
 
-on: [push, workflow_dispatch]
+name: Python CI/CD Pipeline                               # The name of the workflow shown in the GitHub Actions UI
 
-jobs:
-  lint-and-test:
-    name: Lint and Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+on: [push, workflow_dispatch]                             # Triggers: on every push and when manually dispatched from the UI
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
+jobs:                                                     # Root key that defines all jobs in this workflow
+  lint-and-test:                                          # Job identifier for linting and testing the Python code
+    name: Lint and Test                                   # Friendly name displayed in the Actions UI
+    runs-on: ubuntu-latest                                # Use the latest Ubuntu runner for this job
+    steps:                                                # Sequence of steps to execute in this job
+      - name: Checkout Code                               # Step to fetch the repository source code
+        uses: actions/checkout@v4                         # Official checkout action to pull the repo into the runner
 
-      - name: Install requirements
-        run: pip install flake8 pylint
+      - name: Set up Python                               # Step to install/configure Python on the runner
+        uses: actions/setup-python@v5                     # Official action to set up Python versions
+        with:                                             # Inputs for the setup-python action
+          python-version: "3.13"                          # Specify Python version (3.13)
 
-      - name: Lint hello.py
-        run: |
-          flake8 hello.py
-          pylint hello.py
+      - name: Install requirements                        # Step to install linters using pip
+        run: pip install flake8 pylint                    # Install flake8 and pylint (no project deps installed here)
 
-      - name: Test the script
-        run: python hello.py | grep -i hello || exit 1
+      - name: Lint hello.py                               # Step to run linting on hello.py
+        run: |                                            # Use a multi-line shell script
+          flake8 hello.py                                 # Run flake8 to check style/PEP8 issues
+          pylint hello.py                                 # Run pylint for static analysis
 
-  build-and-push:
-    name: Build and Push Container
-    needs: lint-and-test
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      contents: read
+      - name: Test the script                             # Step to perform a simple functional check
+        run: python hello.py | grep -i hello || exit 1    # Run the script, ensure output contains "hello" (case-insensitive), fail otherwise
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+  build-and-push:                                         # Job identifier for building and pushing a container image
+    name: Build and Push Container                        # Friendly job name in the UI
+    needs: lint-and-test                                  # Ensure this job runs only after lint-and-test completes successfully
+    runs-on: ubuntu-latest                                # Use the latest Ubuntu runner
+    permissions:                                          # Fine-grained permissions for GITHUB_TOKEN
+      packages: write                                     # Allow pushing packages (container images) to GHCR
+      contents: read                                      # Allow reading repository contents
 
-      - name: Setup Docker buildx
-        uses: docker/setup-buildx-action@v3
+    steps:                                                # Steps for building and publishing the container
+      - name: Checkout Code                               # Fetch repository source code
+        uses: actions/checkout@v4                         # Official checkout action
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Docker buildx                         # Prepare Docker Buildx for multi-platform builds
+        uses: docker/setup-buildx-action@v3               # Official action to set up Buildx builder
 
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=sha,format=short,prefix=,suffix=
-            type=sha,format=long,prefix=,suffix=
-            type=ref,event=branch,prefix=,suffix=
+      - name: Log in to GitHub Container Registry         # Authenticate to GHCR using GITHUB_TOKEN
+        uses: docker/login-action@v3                      # Official login action for Docker registries
+        with:                                             # Inputs to the login action
+          registry: ghcr.io                               # Target registry is GitHub Container Registry
+          username: ${{ github.actor }}                   # Use the current GitHub actor as username
+          password: ${{ secrets.GITHUB_TOKEN }}           # Use the workflow's GITHUB_TOKEN for auth
 
-      # Build and push Docker image with Buildx
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64, linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      # Extract metadata (tags, labels) for Docker        # Comment: Explain purpose of metadata extraction
+      # https://github.com/docker/metadata-action         # Comment: Link to action documentation
+      - name: Extract Docker metadata                     # Step to compute tags and labels for the image
+        id: meta                                          # Assign an ID to reference outputs in later steps
+        uses: docker/metadata-action@v5                   # Official action to generate Docker image metadata
+        with:                                             # Inputs to the metadata action
+          images: ghcr.io/${{ github.repository }}        # Base image name (org/repo) under GHCR
+          tags: |                                         # Define multiple tagging strategies
+            type=sha,format=short,prefix=,suffix=         # Tag with short commit SHA
+            type=sha,format=long,prefix=,suffix=          # Tag with full commit SHA
+            type=ref,event=branch,prefix=,suffix=         # Tag with branch name when event is a branch
 
+      # Build and push Docker image with Buildx           # Comment: Explain next step purpose
+      # https://github.com/docker/build-push-action       # Comment: Link to action docs
+      - name: Build and push Docker image                 # Step to build and publish the image
+        uses: docker/build-push-action@v5                 # Official action for build and push via Buildx
+        with:                                             # Inputs for the build-push action
+          context: .                                      # Build context is the repository root
+          push: true                                      # Push the built image to the registry
+          platforms: linux/amd64, linux/arm64             # Build multi-arch images (x86_64 and ARM64)
+          tags: ${{ steps.meta.outputs.tags }}            # Use tags generated by the metadata step
+          labels: ${{ steps.meta.outputs.labels }}        # Apply labels generated by the metadata step
 
-  test-image:
-    name: Pull and Test Container
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    permissions:
-      packages: read
-    steps:
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+  test-image:                                             # Job identifier to pull and test the published container
+    name: Pull and Test Container                         # Friendly job name
+    needs: build-and-push                                 # Run only after the image has been built and pushed
+    runs-on: ubuntu-latest                                # Use the latest Ubuntu runner
+    permissions:                                          # Required permissions for pulling packages
+      packages: read                                      # Allow reading (pulling) packages from GHCR
+    steps:                                                # Steps to verify the pushed image works
+      - name: Log in to GitHub Container Registry         # Authenticate to GHCR to pull the image
+        uses: docker/login-action@v3                      # Official login action
+        with:                                             # Inputs for the login action
+          registry: ghcr.io                               # Target registry
+          username: ${{ github.actor }}                   # Use current actor as username
+          password: ${{ secrets.GITHUB_TOKEN }}           # Use GITHUB_TOKEN for auth
 
-      - name: Pull the image from GitHub Container Registry
-        run: docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
+      - name: Pull the image from GitHub Container Registry # Step to download the built image
+        run: docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}  # Pull image tagged by commit SHA
 
-      - name: Run the Image
-        run: docker run --rm ghcr.io/${{ github.repository }}:${{ github.sha }} | grep -i hello || exit 1
+      - name: Run the Image                               # Step to run the container and validate output
+        run: docker run --rm ghcr.io/${{ github.repository }}:${{ github.sha }} | grep -i hello || exit 1  # Check that container prints "hello"
